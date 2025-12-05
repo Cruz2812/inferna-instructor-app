@@ -1,0 +1,32 @@
+{
+  "expo": {
+    "name": "Inferna Instructor",
+    "slug": "inferna-instructor",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "splash": {
+      "resizeMode": "contain",
+      "backgroundColor": "#000000"
+    },
+    "assetBundlePatterns": [
+      "**/*"
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.inferna.instructor"
+    },
+    "android": {
+      "package": "com.inferna.instructor"
+    },
+    "plugins": [
+      [
+        "expo-av",
+        {
+          "microphonePermission": "Allow Inferna to access your microphone."
+        }
+      ],
+      "expo-secure-store"
+    ]
+  }
+}
