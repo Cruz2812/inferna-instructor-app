@@ -1,0 +1,14 @@
+# See backend and mobile .gitignore files
+
+# Backup files
+*.bak
+*.old
+*_old/
+backup_*/
+
+# Database dumps
+*.sql
+*.dump
+
+# Logs
+*.log
