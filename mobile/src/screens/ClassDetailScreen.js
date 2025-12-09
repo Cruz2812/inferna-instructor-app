@@ -30,6 +30,22 @@ export default function ClassDetailScreen({ route, navigation }) {
       </View>
     );
   }
+  const handleStartClass = () => {
+    const playModeWorkouts = workouts.map(w => ({
+      id: w.id,
+      name: w.workout_name || w.name,
+      description: w.description,
+      duration_seconds: w.duration_seconds || 60,
+      coaching_cues: w.coaching_cues,
+      media_url: w.media_url,
+      media_type: w.media_type,
+    }));
+
+    navigation.navigate('PlayMode', {
+      classData: { id: classData.id, name: classData.name },
+      workouts: playModeWorkouts,
+    });
+  };
 
   return (
     <ScrollView style={styles.container}>
@@ -131,12 +147,9 @@ export default function ClassDetailScreen({ route, navigation }) {
         <View style={styles.footer}>
           <TouchableOpacity
             style={styles.startButton}
-            onPress={() => {
-              // Navigate to Play Mode (we'll add this screen later)
-              alert('Play Mode coming soon!');
-            }}
+            onPress={handleStartClass}
           >
-            <Ionicons name="play-circle" size={24} color="#fff" />
+            <Ionicons name="play-circle" size={24} color="#FFF" />
             <Text style={styles.startButtonText}>Start Class</Text>
           </TouchableOpacity>
         </View>
@@ -279,17 +292,18 @@ const styles = StyleSheet.create({
     padding: SPACING.lg,
   },
   startButton: {
-    backgroundColor: COLORS.primary,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    gap: SPACING.sm,
-    padding: SPACING.md,
-    borderRadius: BORDER_RADIUS.md,
+    backgroundColor: COLORS.primary,
+    margin: 20,
+    padding: 18,
+    borderRadius: 12,
+    gap: 8,
   },
   startButtonText: {
-    color: '#fff',
-    fontSize: FONT_SIZES.lg,
+    fontSize: 18,
     fontWeight: '600',
+    color: '#FFF',
   },
 });
