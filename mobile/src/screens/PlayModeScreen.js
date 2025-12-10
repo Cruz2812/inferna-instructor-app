@@ -17,15 +17,6 @@ import {
   Vibration
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-// Handle video component - expo-av is deprecated but still works
-let Video, ResizeMode;
-try {
-  const expoAV = require('expo-av');
-  Video = expoAV.Video;
-  ResizeMode = expoAV.ResizeMode;
-} catch (e) {
-  console.warn('expo-av not available, video playback disabled');
-}
 import { KeepAwake } from 'expo-keep-awake';
 import * as Haptics from 'expo-haptics';
 import { COLORS } from '../constants/theme';  // ✅ Using YOUR theme
@@ -46,7 +37,6 @@ export default function PlayModeScreen({ route, navigation }) {
   
   // Refs
   const timerRef = useRef(null);
-  const videoRef = useRef(null);
   const upNextTimeoutRef = useRef(null);
 
   const currentWorkout = workouts[currentIndex];
@@ -400,22 +390,15 @@ export default function PlayModeScreen({ route, navigation }) {
         {/* Media Display */}
         {!isTransition && currentWorkout?.media_url && (
           <View style={styles.mediaContainer}>
-            {currentWorkout.media_type === 'video' && Video ? (
-              <Video
-                ref={videoRef}
-                source={{ uri: currentWorkout.media_url }}
-                style={styles.media}
-                resizeMode={ResizeMode?.CONTAIN || 'contain'}
-                shouldPlay={!isPaused}
-                isLooping
-                isMuted
-              />
-            ) : (
-              <Image
-                source={{ uri: currentWorkout.media_url }}
-                style={styles.media}
-                resizeMode="contain"
-              />
+            <Image
+              source={{ uri: currentWorkout.media_url }}
+              style={styles.media}
+              resizeMode="contain"
+            />
+            {currentWorkout.media_type === 'video' && (
+              <View style={styles.videoOverlay}>
+                <Ionicons name="play-circle" size={48} color="rgba(255,255,255,0.8)" />
+              </View>
             )}
           </View>
         )}
@@ -626,10 +609,21 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     overflow: 'hidden',
     marginBottom: 20,
+    position: 'relative',
   },
   media: {
     width: '100%',
     height: '100%',
+  },
+  videoOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: 'rgba(0,0,0,0.3)',
   },
 
   cuesContainer: {
