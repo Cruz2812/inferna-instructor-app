@@ -7,6 +7,7 @@ import {
   StyleSheet,
   ActivityIndicator,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useDispatch, useSelector } from 'react-redux';
@@ -23,6 +24,35 @@ export default function ClassDetailScreen({ route, navigation }) {
     dispatch(fetchClassDetail(classId));
   }, [classId]);
 
+  const handleStartClass = () => {
+    // Validation: Check if workouts exist
+    if (!currentClass.workouts || currentClass.workouts.length === 0) {
+      Alert.alert('No Workouts', 'This class has no workouts to play.');
+      return;
+    }
+
+    // Transform workouts data for Play Mode
+    const playModeWorkouts = currentClass.workouts.map((w, index) => ({
+      id: w.id || `workout-${index}`,
+      name: w.workout_name || 'Unnamed Workout',
+      description: w.workout_description || '',
+      duration_seconds: w.duration_override || w.default_duration || 60,
+      coaching_cues: w.instructor_cues || '',
+      media_url: w.media_url || null,
+      media_type: w.media_type || null,
+    }));
+
+    // Navigate to Play Mode with correct data
+    navigation.navigate('PlayMode', {
+      classData: {
+        id: currentClass.id,
+        name: currentClass.name,
+        class_type: currentClass.class_type_name,
+      },
+      workouts: playModeWorkouts,
+    });
+  };
+
   if (loading || !currentClass) {
     return (
       <View style={styles.centerContainer}>
@@ -30,22 +60,6 @@ export default function ClassDetailScreen({ route, navigation }) {
       </View>
     );
   }
-  const handleStartClass = () => {
-    const playModeWorkouts = workouts.map(w => ({
-      id: w.id,
-      name: w.workout_name || w.name,
-      description: w.description,
-      duration_seconds: w.duration_seconds || 60,
-      coaching_cues: w.coaching_cues,
-      media_url: w.media_url,
-      media_type: w.media_type,
-    }));
-
-    navigation.navigate('PlayMode', {
-      classData: { id: classData.id, name: classData.name },
-      workouts: playModeWorkouts,
-    });
-  };
 
   return (
     <ScrollView style={styles.container}>
@@ -106,9 +120,11 @@ export default function ClassDetailScreen({ route, navigation }) {
                   <Text style={styles.workoutNumberText}>{index + 1}</Text>
                 </View>
                 <View style={styles.workoutInfo}>
-                  <Text style={styles.workoutName}>{workout.workout_name}</Text>
+                  <Text style={styles.workoutName}>
+                    {workout.workout_name || 'Unnamed Workout'}
+                  </Text>
                   <Text style={styles.workoutDescription} numberOfLines={2}>
-                    {workout.workout_description}
+                    {workout.workout_description || ''}
                   </Text>
                 </View>
               </View>
@@ -121,7 +137,8 @@ export default function ClassDetailScreen({ route, navigation }) {
                   </Text>
                 </View>
 
-                {workout.transition_time > 0 && (
+                {/* 🔧 FIX: Check if transition_time exists and is > 0 */}
+                {workout.transition_time != null && workout.transition_time > 0 && (
                   <View style={styles.metaItem}>
                     <Ionicons name="swap-horizontal-outline" size={16} color={COLORS.textSecondary} />
                     <Text style={styles.metaText}>{workout.transition_time}s transition</Text>
@@ -296,7 +313,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     backgroundColor: COLORS.primary,
-    margin: 20,
     padding: 18,
     borderRadius: 12,
     gap: 8,

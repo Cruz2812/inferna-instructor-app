@@ -1,5 +1,5 @@
 // ============================================================================
-// ENHANCED PLAY MODE SCREEN
+// ENHANCED PLAY MODE SCREEN - CUSTOMIZED FOR YOUR THEME
 // Full-featured guided class delivery for instructors
 // ============================================================================
 
@@ -17,16 +17,18 @@ import {
   Vibration
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { Video, ResizeMode } from 'expo-av';
+// Handle video component - expo-av is deprecated but still works
+let Video, ResizeMode;
+try {
+  const expoAV = require('expo-av');
+  Video = expoAV.Video;
+  ResizeMode = expoAV.ResizeMode;
+} catch (e) {
+  console.warn('expo-av not available, video playback disabled');
+}
 import { KeepAwake } from 'expo-keep-awake';
 import * as Haptics from 'expo-haptics';
-
-const PLAY_MODE_COLORS = {
-  PRIMARY: '#FF6B35',        // Your brand color
-  TIMER_NORMAL: '#FFFFFF',
-  TIMER_WARNING: '#FF9500',
-  TIMER_DANGER: '#FF3B30',
-};
+import { COLORS } from '../constants/theme';  // ✅ Using YOUR theme
 
 const { width, height } = Dimensions.get('window');
 
@@ -40,7 +42,7 @@ export default function PlayModeScreen({ route, navigation }) {
   const [totalElapsed, setTotalElapsed] = useState(0);
   const [showUpNext, setShowUpNext] = useState(false);
   const [isTransition, setIsTransition] = useState(false);
-  const [transitionTime, setTransitionTime] = useState(10); // 10-second transitions
+  const [transitionTime, setTransitionTime] = useState(10);
   
   // Refs
   const timerRef = useRef(null);
@@ -56,16 +58,12 @@ export default function PlayModeScreen({ route, navigation }) {
   // ============================================================================
 
   useEffect(() => {
-    // Start first workout
     if (currentWorkout) {
       startWorkout();
     }
-
-    // Trigger haptic on mount
     triggerHaptic('medium');
 
     return () => {
-      // Cleanup
       if (timerRef.current) clearInterval(timerRef.current);
       if (upNextTimeoutRef.current) clearTimeout(upNextTimeoutRef.current);
       if (videoRef.current) {
@@ -82,14 +80,10 @@ export default function PlayModeScreen({ route, navigation }) {
     setIsTransition(false);
     setIsPaused(false);
     
-    // Set time based on workout duration
     const duration = currentWorkout?.duration_seconds || 60;
     setTimeRemaining(duration);
-
-    // Start timer
     startTimer();
 
-    // Schedule "Up Next" preview 10 seconds before end
     if (duration > 15 && nextWorkout) {
       upNextTimeoutRef.current = setTimeout(() => {
         setShowUpNext(true);
@@ -104,17 +98,14 @@ export default function PlayModeScreen({ route, navigation }) {
     timerRef.current = setInterval(() => {
       setTimeRemaining(prev => {
         if (prev <= 1) {
-          // Timer finished
           handleWorkoutComplete();
           return 0;
         }
 
-        // Warning haptic at 10 seconds
         if (prev === 10) {
           triggerHaptic('warning');
         }
 
-        // Count haptic for last 3 seconds
         if (prev <= 3) {
           triggerHaptic('light');
         }
@@ -139,10 +130,8 @@ export default function PlayModeScreen({ route, navigation }) {
     triggerHaptic('success');
 
     if (isLastWorkout) {
-      // Class finished!
       handleClassComplete();
     } else {
-      // Start transition to next workout
       startTransition();
     }
   };
@@ -154,7 +143,6 @@ export default function PlayModeScreen({ route, navigation }) {
     timerRef.current = setInterval(() => {
       setTimeRemaining(prev => {
         if (prev <= 1) {
-          // Transition complete, move to next workout
           setCurrentIndex(currentIndex + 1);
           return 0;
         }
@@ -163,7 +151,6 @@ export default function PlayModeScreen({ route, navigation }) {
     }, 1000);
   };
 
-  // Watch for index changes to start next workout
   useEffect(() => {
     if (currentIndex > 0 && !isTransition) {
       startWorkout();
@@ -178,7 +165,6 @@ export default function PlayModeScreen({ route, navigation }) {
     setTimeRemaining(prev => prev + seconds);
     triggerHaptic('medium');
     
-    // Show feedback
     Alert.alert(
       '⏱️ Time Added',
       `Added ${seconds} seconds`,
@@ -322,7 +308,6 @@ export default function PlayModeScreen({ route, navigation }) {
           break;
       }
     } else {
-      // Android vibration patterns
       if (type === 'success') {
         Vibration.vibrate([0, 50, 100, 50]);
       } else if (type === 'warning') {
@@ -340,9 +325,9 @@ export default function PlayModeScreen({ route, navigation }) {
   };
 
   const getTimerColor = () => {
-    if (timeRemaining <= 10) return '#FF3B30'; // Red
-    if (timeRemaining <= 30) return '#FF9500'; // Orange
-    return '#FFFFFF'; // White
+    if (timeRemaining <= 10) return COLORS.error;    // Red (#ff3b30)
+    if (timeRemaining <= 30) return COLORS.warning;  // Orange (#ff9500)
+    return COLORS.text;                               // White (#ffffff)
   };
 
   // ============================================================================
@@ -412,15 +397,15 @@ export default function PlayModeScreen({ route, navigation }) {
           )}
         </View>
 
-        {/* Media Display (Images/Videos) */}
+        {/* Media Display */}
         {!isTransition && currentWorkout?.media_url && (
           <View style={styles.mediaContainer}>
-            {currentWorkout.media_type === 'video' ? (
+            {currentWorkout.media_type === 'video' && Video ? (
               <Video
                 ref={videoRef}
                 source={{ uri: currentWorkout.media_url }}
                 style={styles.media}
-                resizeMode={ResizeMode.CONTAIN}
+                resizeMode={ResizeMode?.CONTAIN || 'contain'}
                 shouldPlay={!isPaused}
                 isLooping
                 isMuted
@@ -487,7 +472,7 @@ export default function PlayModeScreen({ route, navigation }) {
             onPress={restartBlock}
             disabled={isTransition}
           >
-            <Ionicons name="reload-circle" size={28} color="#FFF" />
+            <Ionicons name="reload-circle" size={28} color={COLORS.text} />
           </TouchableOpacity>
         </View>
 
@@ -503,7 +488,7 @@ export default function PlayModeScreen({ route, navigation }) {
             <Ionicons 
               name="play-back-circle" 
               size={60} 
-              color={currentIndex === 0 ? 'rgba(255,255,255,0.3)' : '#FFF'} 
+              color={currentIndex === 0 ? 'rgba(255,255,255,0.3)' : COLORS.text} 
             />
           </TouchableOpacity>
 
@@ -516,7 +501,7 @@ export default function PlayModeScreen({ route, navigation }) {
             <Ionicons 
               name={isPaused ? 'play-circle' : 'pause-circle'} 
               size={80} 
-              color="#FF6B35" 
+              color={COLORS.primary}  // ✅ YOUR red color
             />
           </TouchableOpacity>
 
@@ -529,7 +514,7 @@ export default function PlayModeScreen({ route, navigation }) {
             <Ionicons 
               name="play-forward-circle" 
               size={60} 
-              color={isLastWorkout ? 'rgba(255,255,255,0.3)' : '#FFF'} 
+              color={isLastWorkout ? 'rgba(255,255,255,0.3)' : COLORS.text} 
             />
           </TouchableOpacity>
 
@@ -540,16 +525,15 @@ export default function PlayModeScreen({ route, navigation }) {
 }
 
 // ============================================================================
-// STYLES
+// STYLES - USING YOUR THEME COLORS
 // ============================================================================
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#000',
+    backgroundColor: COLORS.background,  // #000000
   },
   
-  // Exit Button
   exitButton: {
     position: 'absolute',
     top: 50,
@@ -558,7 +542,6 @@ const styles = StyleSheet.create({
     padding: 8,
   },
 
-  // Progress Bar
   progressContainer: {
     position: 'absolute',
     top: 0,
@@ -570,7 +553,7 @@ const styles = StyleSheet.create({
   },
   progressBar: {
     height: '100%',
-    backgroundColor: '#FF6B35',
+    backgroundColor: COLORS.primary,  // #ff3b30 (red)
   },
   progressText: {
     position: 'absolute',
@@ -578,10 +561,9 @@ const styles = StyleSheet.create({
     left: 20,
     fontSize: 16,
     fontWeight: '600',
-    color: '#FFF',
+    color: COLORS.text,  // #ffffff
   },
 
-  // Content
   contentContainer: {
     flex: 1,
     justifyContent: 'center',
@@ -598,24 +580,23 @@ const styles = StyleSheet.create({
   workoutName: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#FFF',
+    color: COLORS.text,
     textAlign: 'center',
     marginBottom: 8,
   },
   workoutDescription: {
     fontSize: 16,
-    color: 'rgba(255,255,255,0.7)',
+    color: COLORS.textSecondary,  // #8e8e93
     textAlign: 'center',
   },
   transitionText: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#FF6B35',
+    color: COLORS.primary,  // #ff3b30 (red)
     marginBottom: 8,
     letterSpacing: 2,
   },
 
-  // Timer
   timerContainer: {
     alignItems: 'center',
     marginBottom: 40,
@@ -629,17 +610,16 @@ const styles = StyleSheet.create({
     marginTop: 12,
     paddingHorizontal: 16,
     paddingVertical: 6,
-    backgroundColor: 'rgba(255,107,53,0.3)',
+    backgroundColor: `${COLORS.primary}33`,  // primary with 20% opacity
     borderRadius: 20,
   },
   pausedText: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#FF6B35',
+    color: COLORS.primary,
     letterSpacing: 1,
   },
 
-  // Media
   mediaContainer: {
     width: width * 0.85,
     height: height * 0.25,
@@ -652,9 +632,8 @@ const styles = StyleSheet.create({
     height: '100%',
   },
 
-  // Coaching Cues
   cuesContainer: {
-    backgroundColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: COLORS.surfaceLight,  // #2c2c2e
     paddingHorizontal: 20,
     paddingVertical: 12,
     borderRadius: 12,
@@ -662,18 +641,17 @@ const styles = StyleSheet.create({
   },
   cuesText: {
     fontSize: 16,
-    color: '#FFF',
+    color: COLORS.text,
     textAlign: 'center',
     lineHeight: 22,
   },
 
-  // Up Next
   upNextContainer: {
     position: 'absolute',
     bottom: 40,
     left: 30,
     right: 30,
-    backgroundColor: 'rgba(255,107,53,0.95)',
+    backgroundColor: `${COLORS.primary}F2`,  // primary with 95% opacity
     padding: 16,
     borderRadius: 12,
     alignItems: 'center',
@@ -681,24 +659,23 @@ const styles = StyleSheet.create({
   upNextLabel: {
     fontSize: 12,
     fontWeight: '700',
-    color: '#FFF',
+    color: COLORS.text,
     letterSpacing: 1,
     marginBottom: 4,
   },
   upNextName: {
     fontSize: 18,
     fontWeight: '600',
-    color: '#FFF',
+    color: COLORS.text,
     textAlign: 'center',
   },
 
-  // Control Panel
   controlPanel: {
     position: 'absolute',
     bottom: 0,
     left: 0,
     right: 0,
-    backgroundColor: 'rgba(20,20,20,0.95)',
+    backgroundColor: COLORS.surface,  // #1c1c1e
     paddingTop: 20,
     paddingBottom: Platform.OS === 'ios' ? 40 : 20,
     paddingHorizontal: 20,
@@ -706,14 +683,13 @@ const styles = StyleSheet.create({
     borderTopRightRadius: 24,
   },
 
-  // Time Adjustment
   timeAdjustRow: {
     flexDirection: 'row',
     justifyContent: 'space-around',
     marginBottom: 20,
   },
   timeButton: {
-    backgroundColor: 'rgba(255,255,255,0.15)',
+    backgroundColor: COLORS.surfaceLight,  // #2c2c2e
     paddingHorizontal: 20,
     paddingVertical: 10,
     borderRadius: 20,
@@ -723,10 +699,10 @@ const styles = StyleSheet.create({
   timeButtonText: {
     fontSize: 16,
     fontWeight: '600',
-    color: '#FFF',
+    color: COLORS.text,
   },
   restartButton: {
-    backgroundColor: 'rgba(255,107,53,0.3)',
+    backgroundColor: `${COLORS.primary}4D`,  // primary with 30% opacity
     paddingHorizontal: 16,
     paddingVertical: 8,
     borderRadius: 20,
@@ -734,7 +710,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
 
-  // Main Controls
   mainControls: {
     flexDirection: 'row',
     justifyContent: 'center',

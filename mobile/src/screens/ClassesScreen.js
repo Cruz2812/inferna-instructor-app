@@ -84,10 +84,7 @@ export default function ClassesScreen({ navigation }) {
         <Text style={styles.title}>My Classes</Text>
         <TouchableOpacity
           style={styles.addButton}
-          onPress={() => {
-            // Temporary until we build ClassBuilder
-            alert('Class Builder coming soon! This will let you create custom classes.');
-          }}
+          onPress={() => navigation.navigate('ClassBuilder')}
         >
           <Ionicons name="add" size={24} color="#fff" />
         </TouchableOpacity>

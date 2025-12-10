@@ -63,6 +63,11 @@ const classesSlice = createSlice({
       state.builder[field] = value;
     },
     addWorkoutToBuilder: (state, action) => {
+      console.log('=== ADDING WORKOUT ===');
+      console.log('Payload:', action.payload);
+      console.log('ID:', action.payload.id);
+      console.log('====================');
+      
       state.builder.workouts.push({
         workoutId: action.payload.id,
         workout: action.payload,

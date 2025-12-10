@@ -12,6 +12,7 @@ import WorkoutDetailScreen from '../screens/WorkoutDetailScreen';
 import ClassesScreen from '../screens/ClassesScreen';
 import ClassDetailScreen from '../screens/ClassDetailScreen';
 import PlayModeScreen from '../screens/PlayModeScreen';
+import ClassBuilderScreen from '../screens/ClassBuilderScreen';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -75,6 +76,11 @@ function ClassesStack() {
       <Stack.Screen 
         name="PlayMode" 
         component={PlayModeScreen}
+        options={{ headerShown: false }}
+      />
+      <Stack.Screen
+        name="ClassBuilder"
+        component={ClassBuilderScreen}
         options={{ headerShown: false }}
       />
     </Stack.Navigator>
