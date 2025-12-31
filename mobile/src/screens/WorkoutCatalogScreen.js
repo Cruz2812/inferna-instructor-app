@@ -1,222 +1,211 @@
-// src/screens/WorkoutCatalogScreen.js
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import {
   View,
   Text,
+  StyleSheet,
   FlatList,
   TextInput,
   TouchableOpacity,
-  StyleSheet,
   ActivityIndicator,
   RefreshControl,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useDispatch, useSelector } from 'react-redux';
-import { fetchWorkouts, setFilters } from '../store/workoutsSlice';
-import { COLORS, SPACING, BORDER_RADIUS, FONT_SIZES } from '../constants/theme';
-import { useIsFocused } from '@react-navigation/native';
+import { fetchWorkouts, setSearchQuery } from '../store/workoutsSlice';
+import { COLORS, SPACING, FONT_SIZES, BORDER_RADIUS } from '../constants/theme';
+
+const DIFFICULTY_COLORS = {
+  beginner: COLORS.beginner,
+  intermediate: COLORS.intermediate,
+  advanced: COLORS.advanced,
+  all_levels: COLORS.all_levels,
+};
 
 export default function WorkoutCatalogScreen({ navigation }) {
   const dispatch = useDispatch();
-  const { items, loading, filters } = useSelector((state) => state.workouts);
-  const [searchText, setSearchText] = useState('');
+  const { items, loading, searchQuery } = useSelector(state => state.workouts);
+  
+  const [localSearchQuery, setLocalSearchQuery] = useState(searchQuery);
   const [refreshing, setRefreshing] = useState(false);
-  const isFocused = useIsFocused();
-  const lastTapTime = useRef(0);
-  const flatListRef = useRef(null);
 
   useEffect(() => {
-    dispatch(fetchWorkouts(filters));
-  }, [filters]);
-
-  // Real-time search with debounce
-  useEffect(() => {
-    const timer = setTimeout(() => {
-      dispatch(setFilters({ search: searchText }));
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [searchText]);
-
-  // Double-tap detection
-  useEffect(() => {
-    const unsubscribe = navigation.addListener('tabPress', () => {
-      if (isFocused) {
-        const now = Date.now();
-        if (now - lastTapTime.current < 400) {
-          // Double tap detected!
-          handleReset();
-        }
-        lastTapTime.current = now;
-      }
+    // Set header button for creating workouts
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity
+          style={styles.headerButton}
+          onPress={handleCreateWorkout}
+        >
+          <Ionicons name="add" size={28} color={COLORS.primary} />
+        </TouchableOpacity>
+      ),
     });
-    return unsubscribe;
-  }, [navigation, isFocused]);
+  }, [navigation]);
 
-  const handleReset = () => {
-    setSearchText('');
-    dispatch(setFilters({ search: '' }));
-    // Scroll to top
-    if (flatListRef.current && items.length > 0) {
-      flatListRef.current.scrollToOffset({ offset: 0, animated: true });
-    }
+  const handleCreateWorkout = () => {
+    navigation.push('WorkoutBuilder');
   };
 
-  const handleRefresh = async () => {
+  useEffect(() => {
+    dispatch(fetchWorkouts({ search: searchQuery }));
+  }, [searchQuery]);
+
+  // Debounce search
+  useEffect(() => {
+    const timeoutId = setTimeout(() => {
+      if (localSearchQuery !== searchQuery) {
+        dispatch(setSearchQuery(localSearchQuery));
+      }
+    }, 300);
+
+    return () => clearTimeout(timeoutId);
+  }, [localSearchQuery]);
+
+  const handleRefresh = useCallback(async () => {
     setRefreshing(true);
-    await dispatch(fetchWorkouts(filters)).unwrap().catch(() => {});
-    setTimeout(() => setRefreshing(false), 300);
+    await dispatch(fetchWorkouts({ search: searchQuery }));
+    setRefreshing(false);
+  }, [searchQuery]);
+
+  const handleWorkoutPress = (workout) => {
+    navigation.push('WorkoutDetail', { workoutId: workout.id });
   };
 
-  const handleClearSearch = () => {
-    setSearchText('');
-    dispatch(setFilters({ search: '' }));
+  const formatDuration = (seconds) => {
+    const minutes = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    if (minutes === 0) return `${secs}s`;
+    if (secs === 0) return `${minutes}m`;
+    return `${minutes}m ${secs}s`;
   };
 
-  const getDifficultyColor = (difficulty) => {
-    switch (difficulty) {
-      case 'beginner': return COLORS.beginner;
-      case 'intermediate': return COLORS.intermediate;
-      case 'advanced': return COLORS.advanced;
-      default: return COLORS.all_levels;
-    }
+  const formatDifficulty = (difficulty) => {
+    return difficulty.split('_').map(word => 
+      word.charAt(0).toUpperCase() + word.slice(1)
+    ).join(' ');
   };
 
-  const renderWorkout = ({ item }) => (
+  const renderWorkoutItem = ({ item }) => (
     <TouchableOpacity
-      style={styles.card}
-      onPress={() => navigation.navigate('WorkoutDetail', { workoutId: item.id })}
+      style={styles.workoutCard}
+      onPress={() => handleWorkoutPress(item)}
       activeOpacity={0.7}
     >
       <View style={styles.cardHeader}>
-        <Text style={styles.workoutName}>{item.name}</Text>
-        <View style={[styles.difficultyBadge, { backgroundColor: getDifficultyColor(item.difficulty) }]}>
-          <Text style={styles.difficultyText}>{item.difficulty?.toUpperCase() || 'ALL'}</Text>
+        <View style={styles.cardTitleContainer}>
+          <Text style={styles.workoutName}>{item.name}</Text>
+          <View style={styles.metaRow}>
+            <View
+              style={[
+                styles.difficultyBadge,
+                { backgroundColor: DIFFICULTY_COLORS[item.difficulty] }
+              ]}
+            >
+              <Text style={styles.difficultyText}>
+                {formatDifficulty(item.difficulty)}
+              </Text>
+            </View>
+            <View style={styles.durationContainer}>
+              <Ionicons name="time-outline" size={14} color={COLORS.textSecondary} />
+              <Text style={styles.durationText}>
+                {formatDuration(item.default_duration)}
+              </Text>
+            </View>
+          </View>
         </View>
+        <Ionicons name="chevron-forward" size={24} color={COLORS.textSecondary} />
       </View>
 
-      <Text style={styles.description} numberOfLines={2}>
-        {item.description || 'No description'}
-      </Text>
-
-      <View style={styles.cardFooter}>
-        <View style={styles.metaItem}>
-          <Ionicons name="time-outline" size={16} color={COLORS.textSecondary} />
-          <Text style={styles.metaText}>{Math.ceil((item.default_duration || 0) / 60)} min</Text>
-        </View>
-
-        {item.injury_risks && item.injury_risks.length > 0 && (
-          <View style={styles.metaItem}>
-            <Ionicons name="alert-circle-outline" size={16} color={COLORS.warning} />
-            <Text style={styles.metaText}>{item.injury_risks.length} risks</Text>
-          </View>
-        )}
-
-        {item.media && item.media.length > 0 && (
-          <View style={styles.metaItem}>
-            <Ionicons name="image-outline" size={16} color={COLORS.textSecondary} />
-            <Text style={styles.metaText}>{item.media.length}</Text>
-          </View>
-        )}
-      </View>
+      {item.description && (
+        <Text style={styles.description} numberOfLines={2}>
+          {item.description}
+        </Text>
+      )}
 
       {item.tags && item.tags.length > 0 && (
-        <View style={styles.tags}>
+        <View style={styles.tagsContainer}>
           {item.tags.slice(0, 3).map((tag, index) => (
             <View key={index} style={styles.tag}>
               <Text style={styles.tagText}>{tag}</Text>
             </View>
           ))}
+          {item.tags.length > 3 && (
+            <Text style={styles.moreTagsText}>+{item.tags.length - 3} more</Text>
+          )}
         </View>
       )}
     </TouchableOpacity>
   );
 
-  const ListHeaderComponent = (
-    <View>
-      {/* Search Bar */}
-      <View style={styles.searchContainer}>
-        <View style={styles.searchBar}>
-          <Ionicons name="search" size={20} color={COLORS.textSecondary} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search workouts..."
-            placeholderTextColor={COLORS.textSecondary}
-            value={searchText}
-            onChangeText={setSearchText}
-            returnKeyType="search"
-            autoCorrect={false}
-          />
-          {searchText.length > 0 && (
-            <TouchableOpacity onPress={handleClearSearch} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
-              <Ionicons name="close-circle" size={20} color={COLORS.textSecondary} />
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
+  const renderEmptyState = () => {
+    if (loading) return null;
 
-      {/* Search Results Indicator */}
-      {searchText.length > 0 && (
-        <View style={styles.searchIndicator}>
-          <Text style={styles.searchIndicatorText}>
-            "{searchText}" • {items.length} result{items.length !== 1 ? 's' : ''}
-          </Text>
-          <TouchableOpacity onPress={handleClearSearch}>
-            <Text style={styles.clearText}>Clear</Text>
+    return (
+      <View style={styles.emptyState}>
+        <Ionicons name="fitness-outline" size={64} color={COLORS.textSecondary} />
+        <Text style={styles.emptyStateTitle}>
+          {searchQuery ? 'No workouts found' : 'No workouts yet'}
+        </Text>
+        <Text style={styles.emptyStateText}>
+          {searchQuery 
+            ? 'Try adjusting your search terms'
+            : 'Create your first workout to get started'}
+        </Text>
+        {!searchQuery && (
+          <TouchableOpacity
+            style={styles.emptyStateButton}
+            onPress={handleCreateWorkout}
+          >
+            <Ionicons name="add" size={20} color={COLORS.text} />
+            <Text style={styles.emptyStateButtonText}>Create Workout</Text>
           </TouchableOpacity>
-        </View>
-      )}
-    </View>
-  );
-
-  if (loading && items.length === 0) {
-    return (
-      <View style={styles.container}>
-        {ListHeaderComponent}
-        <View style={styles.centerContainer}>
-          <ActivityIndicator size="large" color={COLORS.primary} />
-        </View>
+        )}
       </View>
     );
-  }
-
-  if (items.length === 0) {
-    return (
-      <View style={styles.container}>
-        {ListHeaderComponent}
-        <View style={styles.centerContainer}>
-          <Ionicons name="barbell-outline" size={64} color={COLORS.textSecondary} />
-          <Text style={styles.emptyText}>
-            {searchText ? 'No workouts found' : 'No workouts available'}
-          </Text>
-          {searchText && (
-            <TouchableOpacity style={styles.clearButton} onPress={handleClearSearch}>
-              <Text style={styles.clearButtonText}>Clear Search</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      </View>
-    );
-  }
+  };
 
   return (
     <View style={styles.container}>
+      {/* Search Bar */}
+      <View style={styles.searchContainer}>
+        <Ionicons name="search" size={20} color={COLORS.textSecondary} />
+        <TextInput
+          style={styles.searchInput}
+          placeholder="Search workouts..."
+          placeholderTextColor={COLORS.textSecondary}
+          value={localSearchQuery}
+          onChangeText={setLocalSearchQuery}
+        />
+        {localSearchQuery.length > 0 && (
+          <TouchableOpacity onPress={() => setLocalSearchQuery('')}>
+            <Ionicons name="close-circle" size={20} color={COLORS.textSecondary} />
+          </TouchableOpacity>
+        )}
+      </View>
+
+      {/* Workout List */}
       <FlatList
-        ref={flatListRef}
         data={items}
-        renderItem={renderWorkout}
+        renderItem={renderWorkoutItem}
         keyExtractor={(item) => item.id}
-        ListHeaderComponent={ListHeaderComponent}
         contentContainerStyle={styles.listContent}
         refreshControl={
           <RefreshControl
             refreshing={refreshing}
             onRefresh={handleRefresh}
             tintColor={COLORS.primary}
-            colors={[COLORS.primary]}
           />
         }
+        ListEmptyComponent={renderEmptyState}
         showsVerticalScrollIndicator={false}
       />
+
+      {/* Loading Overlay */}
+      {loading && !refreshing && (
+        <View style={styles.loadingOverlay}>
+          <ActivityIndicator size="large" color={COLORS.primary} />
+        </View>
+      )}
     </View>
   );
 }
@@ -226,62 +215,57 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: COLORS.background,
   },
-  searchContainer: {
-    padding: SPACING.md,
-    backgroundColor: COLORS.background,
+  headerButton: {
+    marginRight: SPACING.md,
   },
-  searchBar: {
+  searchContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: COLORS.surface,
-    borderRadius: BORDER_RADIUS.md,
+    margin: SPACING.md,
     paddingHorizontal: SPACING.md,
+    paddingVertical: SPACING.sm,
+    borderRadius: BORDER_RADIUS.md,
     gap: SPACING.sm,
   },
   searchInput: {
     flex: 1,
-    color: COLORS.text,
     fontSize: FONT_SIZES.md,
-    paddingVertical: SPACING.md,
-  },
-  searchIndicator: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: SPACING.md,
-    paddingBottom: SPACING.md,
-    backgroundColor: COLORS.background,
-  },
-  searchIndicatorText: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.textSecondary,
-  },
-  clearText: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.primary,
-    fontWeight: '600',
+    color: COLORS.text,
+    paddingVertical: SPACING.xs,
   },
   listContent: {
-    paddingBottom: SPACING.lg,
+    padding: SPACING.md,
+    paddingTop: 0,
+    flexGrow: 1,
   },
-  card: {
+  workoutCard: {
     backgroundColor: COLORS.surface,
     borderRadius: BORDER_RADIUS.md,
     padding: SPACING.md,
     marginBottom: SPACING.md,
-    marginHorizontal: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.border,
   },
   cardHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
+    alignItems: 'flex-start',
     marginBottom: SPACING.sm,
   },
-  workoutName: {
+  cardTitleContainer: {
     flex: 1,
+  },
+  workoutName: {
     fontSize: FONT_SIZES.lg,
     fontWeight: '600',
     color: COLORS.text,
+    marginBottom: SPACING.xs,
+  },
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: SPACING.sm,
   },
   difficultyBadge: {
     paddingHorizontal: SPACING.sm,
@@ -290,33 +274,29 @@ const styles = StyleSheet.create({
   },
   difficultyText: {
     fontSize: FONT_SIZES.xs,
-    fontWeight: '700',
-    color: '#000',
+    fontWeight: '600',
+    color: COLORS.text,
   },
-  description: {
-    fontSize: FONT_SIZES.sm,
-    color: COLORS.textSecondary,
-    marginBottom: SPACING.md,
-    lineHeight: 20,
-  },
-  cardFooter: {
-    flexDirection: 'row',
-    gap: SPACING.md,
-  },
-  metaItem: {
+  durationContainer: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: SPACING.xs,
   },
-  metaText: {
+  durationText: {
     fontSize: FONT_SIZES.sm,
     color: COLORS.textSecondary,
   },
-  tags: {
+  description: {
+    fontSize: FONT_SIZES.sm,
+    color: COLORS.textSecondary,
+    marginBottom: SPACING.sm,
+    lineHeight: 20,
+  },
+  tagsContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: SPACING.xs,
-    marginTop: SPACING.sm,
+    alignItems: 'center',
   },
   tag: {
     backgroundColor: COLORS.surfaceLight,
@@ -328,27 +308,48 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZES.xs,
     color: COLORS.textSecondary,
   },
-  centerContainer: {
+  moreTagsText: {
+    fontSize: FONT_SIZES.xs,
+    color: COLORS.textSecondary,
+    fontStyle: 'italic',
+  },
+  emptyState: {
     flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    padding: SPACING.xl,
+    paddingHorizontal: SPACING.xl,
   },
-  emptyText: {
+  emptyStateTitle: {
     fontSize: FONT_SIZES.lg,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginTop: SPACING.md,
+    marginBottom: SPACING.sm,
+  },
+  emptyStateText: {
+    fontSize: FONT_SIZES.md,
     color: COLORS.textSecondary,
-    marginTop: SPACING.md,
+    textAlign: 'center',
+    marginBottom: SPACING.lg,
   },
-  clearButton: {
-    marginTop: SPACING.md,
-    paddingHorizontal: SPACING.lg,
-    paddingVertical: SPACING.sm,
+  emptyStateButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
     backgroundColor: COLORS.primary,
+    paddingHorizontal: SPACING.lg,
+    paddingVertical: SPACING.md,
     borderRadius: BORDER_RADIUS.md,
+    gap: SPACING.sm,
   },
-  clearButtonText: {
-    color: '#fff',
+  emptyStateButtonText: {
     fontSize: FONT_SIZES.md,
     fontWeight: '600',
+    color: COLORS.text,
+  },
+  loadingOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    backgroundColor: 'rgba(10, 14, 39, 0.7)',
+    justifyContent: 'center',
+    alignItems: 'center',
   },
 });

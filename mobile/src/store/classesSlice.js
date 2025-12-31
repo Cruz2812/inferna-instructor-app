@@ -2,6 +2,7 @@
 import { createSlice, createAsyncThunk } from '@reduxjs/toolkit';
 import api from '../services/api';
 
+// src/store/classesSlice.js
 export const fetchClasses = createAsyncThunk(
   'classes/fetchClasses',
   async (filters = {}, { rejectWithValue }) => {
@@ -9,6 +10,7 @@ export const fetchClasses = createAsyncThunk(
       const params = new URLSearchParams();
       if (filters.status) params.append('status', filters.status);
       if (filters.scheduled) params.append('scheduled', filters.scheduled);
+      if (filters.tab) params.append('tab', filters.tab); // ADD THIS
       
       const response = await api.get(`/classes?${params.toString()}`);
       return response.data;

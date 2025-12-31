@@ -1,34 +1,60 @@
 // src/screens/ClassesScreen.js
-import React, { useEffect } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
-  FlatList,
   TouchableOpacity,
   StyleSheet,
   ActivityIndicator,
+  Alert,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useDispatch, useSelector } from 'react-redux';
 import { fetchClasses } from '../store/classesSlice';
 import { format } from 'date-fns';
 import { COLORS, SPACING, BORDER_RADIUS, FONT_SIZES } from '../constants/theme';
-import { useSafeAreaInsets } from 'react-native-safe-area-context'; // ADD THIS
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { SwipeListView } from 'react-native-swipe-list-view';  // ✅ ADD THIS
+import api from '../services/api';  // ✅ ADD THIS
 
 export default function ClassesScreen({ navigation }) {
+  const insets = useSafeAreaInsets();
+  const [activeTab, setActiveTab] = useState('personal');
   const dispatch = useDispatch();
   const { items, loading } = useSelector((state) => state.classes);
-  const insets = useSafeAreaInsets(); // ADD THIS
 
   useEffect(() => {
-    dispatch(fetchClasses());
-  }, []);
+    dispatch(fetchClasses({ tab: activeTab }));
+  }, [activeTab]);
 
-  const handleRefresh = () => {
-    dispatch(fetchClasses());
+  // ✅ ADD DELETE HANDLER
+  const handleDeleteClass = (classId, className) => {
+    Alert.alert(
+      'Delete Class',
+      `Delete "${className}"? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await api.delete(`/classes/${classId}`);
+              // Refresh list
+              dispatch(fetchClasses({ tab: activeTab }));
+              Alert.alert('Success', 'Class deleted');
+            } catch (error) {
+              console.error('Delete error:', error);
+              Alert.alert('Error', 'Failed to delete class');
+            }
+          }
+        }
+      ]
+    );
   };
 
-  const renderClass = ({ item }) => (
+  // ✅ RENDER VISIBLE ROW
+  const renderItem = ({ item }) => (
     <TouchableOpacity
       style={styles.card}
       onPress={() => navigation.navigate('ClassDetail', { classId: item.id })}
@@ -42,6 +68,12 @@ export default function ClassesScreen({ navigation }) {
         )}
       </View>
 
+      {item.is_featured && (
+        <View style={styles.featuredBadge}>
+          <Text style={styles.featuredText}>⭐ FEATURED</Text>
+        </View>
+      )}
+
       {item.class_type_name && (
         <Text style={styles.classType}>{item.class_type_name}</Text>
       )}
@@ -50,38 +82,40 @@ export default function ClassesScreen({ navigation }) {
         <View style={styles.metaRow}>
           <Ionicons name="calendar-outline" size={16} color={COLORS.textSecondary} />
           <Text style={styles.metaText}>
-            {format(new Date(item.scheduled_at), 'MMM d, yyyy')}
+            {format(new Date(item.scheduled_at), 'MMM d, yyyy • h:mm a')}
           </Text>
-          <Ionicons name="time-outline" size={16} color={COLORS.textSecondary} />
-          <Text style={styles.metaText}>
-            {format(new Date(item.scheduled_at), 'h:mm a')}
-          </Text>
-        </View>
-      )}
-
-      {item.room && (
-        <View style={styles.metaRow}>
-          <Ionicons name="location-outline" size={16} color={COLORS.textSecondary} />
-          <Text style={styles.metaText}>{item.room}</Text>
         </View>
       )}
 
       <View style={styles.cardFooter}>
         <View style={styles.workoutCount}>
-          <Ionicons name="fitness-outline" size={16} color={COLORS.primary} />
+          <Ionicons name="fitness-outline" size={16} color={COLORS.text} />
           <Text style={styles.workoutCountText}>
-            {item.workout_count || 0} workouts
+            {item.workout_count || 0} workout{item.workout_count !== 1 ? 's' : ''}
           </Text>
         </View>
       </View>
     </TouchableOpacity>
   );
 
+  // ✅ RENDER HIDDEN DELETE BUTTON
+  const renderHiddenItem = (data, rowMap) => (
+    <View style={styles.rowBack}>
+      <TouchableOpacity
+        style={styles.deleteButton}
+        onPress={() => handleDeleteClass(data.item.id, data.item.name)}
+      >
+        <Ionicons name="trash-outline" size={24} color="#fff" />
+        <Text style={styles.deleteButtonText}>Delete</Text>
+      </TouchableOpacity>
+    </View>
+  );
+
   return (
     <View style={styles.container}>
       {/* Header */}
       <View style={[styles.header, { paddingTop: insets.top + SPACING.md }]}>
-        <Text style={styles.title}>My Classes</Text>
+        <Text style={styles.title}>Classes</Text>
         <TouchableOpacity
           style={styles.addButton}
           onPress={() => navigation.navigate('ClassBuilder')}
@@ -90,27 +124,56 @@ export default function ClassesScreen({ navigation }) {
         </TouchableOpacity>
       </View>
 
-      {/* Class List */}
-      {loading && items.length === 0 ? (
+      {/* Tab Bar */}
+      <View style={styles.tabBar}>
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'featured' && styles.activeTab]}
+          onPress={() => setActiveTab('featured')}
+        >
+          <Text style={[styles.tabText, activeTab === 'featured' && styles.activeTabText]}>
+            Featured
+          </Text>
+        </TouchableOpacity>
+        
+        <TouchableOpacity
+          style={[styles.tab, activeTab === 'personal' && styles.activeTab]}
+          onPress={() => setActiveTab('personal')}
+        >
+          <Text style={[styles.tabText, activeTab === 'personal' && styles.activeTabText]}>
+            My Classes
+          </Text>
+        </TouchableOpacity>
+      </View>
+
+      {/* Class List with Swipe */}
+      {loading ? (
         <View style={styles.centerContainer}>
           <ActivityIndicator size="large" color={COLORS.primary} />
         </View>
-      ) : items.length === 0 ? (
-        <View style={styles.centerContainer}>
-          <Ionicons name="calendar-outline" size={64} color={COLORS.textSecondary} />
-          <Text style={styles.emptyText}>No classes yet</Text>
-          <Text style={styles.emptySubtext}>
-            Tap the + button to create your first class
-          </Text>
-        </View>
       ) : (
-        <FlatList
+        <SwipeListView
           data={items}
-          renderItem={renderClass}
+          renderItem={renderItem}
+          renderHiddenItem={activeTab === 'personal' ? renderHiddenItem : null}  // Only in personal tab
           keyExtractor={(item) => item.id}
           contentContainerStyle={styles.list}
-          onRefresh={handleRefresh}
+          rightOpenValue={-75}  // How far to swipe
+          disableRightSwipe  // Only allow swipe left
+          onRefresh={() => dispatch(fetchClasses({ tab: activeTab }))}
           refreshing={loading}
+          ListEmptyComponent={
+            <View style={styles.centerContainer}>
+              <Ionicons name="fitness-outline" size={64} color={COLORS.textSecondary} />
+              <Text style={styles.emptyText}>
+                {activeTab === 'featured' ? 'No featured classes yet' : 'No classes yet'}
+              </Text>
+              <Text style={styles.emptySubtext}>
+                {activeTab === 'featured' 
+                  ? 'Check back later for featured content' 
+                  : 'Tap + to create your first class'}
+              </Text>
+            </View>
+          }
         />
       )}
     </View>
@@ -126,7 +189,8 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    padding: SPACING.lg,
+    paddingHorizontal: SPACING.lg,
+    paddingBottom: SPACING.md,
     borderBottomWidth: 1,
     borderBottomColor: COLORS.border,
   },
@@ -143,6 +207,29 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
   },
+  tabBar: {
+    flexDirection: 'row',
+    backgroundColor: COLORS.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: COLORS.border,
+  },
+  tab: {
+    flex: 1,
+    paddingVertical: 16,
+    alignItems: 'center',
+  },
+  activeTab: {
+    borderBottomWidth: 2,
+    borderBottomColor: COLORS.primary,
+  },
+  tabText: {
+    fontSize: 16,
+    fontWeight: '600',
+    color: COLORS.textSecondary,
+  },
+  activeTabText: {
+    color: COLORS.primary,
+  },
   list: {
     padding: SPACING.md,
   },
@@ -151,6 +238,7 @@ const styles = StyleSheet.create({
     borderRadius: BORDER_RADIUS.md,
     padding: SPACING.md,
     marginBottom: SPACING.md,
+    marginHorizontal: SPACING.md,  // ✅ ADD THIS
   },
   cardHeader: {
     flexDirection: 'row',
@@ -174,6 +262,19 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZES.xs,
     fontWeight: '700',
     color: '#000',
+  },
+  featuredBadge: {
+    backgroundColor: COLORS.primary,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 4,
+    alignSelf: 'flex-start',
+    marginBottom: SPACING.sm,
+  },
+  featuredText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '700',
   },
   classType: {
     fontSize: FONT_SIZES.sm,
@@ -211,6 +312,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: SPACING.xl,
+    marginTop: SPACING.xxl,
   },
   emptyText: {
     fontSize: FONT_SIZES.lg,
@@ -223,5 +325,28 @@ const styles = StyleSheet.create({
     color: COLORS.textSecondary,
     marginTop: SPACING.xs,
     textAlign: 'center',
+  },
+  rowBack: {
+    alignItems: 'center',
+    backgroundColor: COLORS.error,
+    flex: 1,
+    flexDirection: 'row',
+    justifyContent: 'flex-end',
+    paddingRight: SPACING.md,
+    marginBottom: SPACING.md,
+    marginHorizontal: SPACING.md,
+    borderRadius: BORDER_RADIUS.md,
+  },
+  deleteButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: 75,
+    height: '100%',
+  },
+  deleteButtonText: {
+    color: '#fff',
+    fontSize: FONT_SIZES.xs,
+    fontWeight: '600',
+    marginTop: 4,
   },
 });

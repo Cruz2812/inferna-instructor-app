@@ -3,7 +3,7 @@
 // CLASS BUILDER - Create custom classes with drag-and-drop workouts
 // ============================================================================
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useLayoutEffect } from 'react';
 import {
   View,
   Text,
@@ -20,6 +20,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { useDispatch, useSelector } from 'react-redux';
 import DateTimePicker from '@react-native-community/datetimepicker';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import api from '../services/api'; 
 import {
   setBuilderField,
   addWorkoutToBuilder,
@@ -30,8 +31,9 @@ import {
 } from '../store/classesSlice';
 import { fetchWorkouts } from '../store/workoutsSlice';
 import { COLORS, SPACING, BORDER_RADIUS, FONT_SIZES } from '../constants/theme';
+import { Calendar } from 'react-native-calendars';
 
-export default function ClassBuilderScreen({ navigation }) {
+export default function ClassBuilderScreen({ navigation, route }) {
   const dispatch = useDispatch();
   const insets = useSafeAreaInsets();
   
@@ -47,11 +49,42 @@ export default function ClassBuilderScreen({ navigation }) {
   const [saving, setSaving] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [selectedWorkouts, setSelectedWorkouts] = useState([]); // Track multi-select
+  const [selectedHour, setSelectedHour] = useState('');
+  const [selectedMinute, setSelectedMinute] = useState('');
 
   useEffect(() => {
-    // Load workouts when component mounts
     dispatch(fetchWorkouts());
+    
+    // Check if editing OR duplicating
+    if (route.params?.editMode && route.params?.classData) {
+      // EDIT MODE - includes classId
+      loadClassData(route.params.classData);
+    } else if (route.params?.duplicateMode && route.params?.classData) {
+      // DUPLICATE MODE - no classId
+      loadClassData(route.params.classData);
+    }
   }, []);
+
+const loadClassData = (classData) => {
+  dispatch(setBuilderField({ field: 'name', value: classData.name }));
+  dispatch(setBuilderField({ field: 'scheduledAt', value: classData.scheduled_at }));
+  dispatch(setBuilderField({ field: 'classTypeId', value: classData.class_type_id }));
+  
+  const workoutsToAdd = classData.workouts?.map(w => ({
+    workoutId: w.workout_id || w.id,
+    workout: {
+      id: w.workout_id || w.id,
+      workout_name: w.workout_name,
+      description: w.workout_description,
+      default_duration: w.default_duration,
+    },
+    durationOverride: w.duration_override || w.default_duration,
+    transitionTime: w.transition_time || 30,
+    instructorCues: w.instructor_cues || '',
+  })) || [];
+  
+  dispatch(setBuilderField({ field: 'workouts', value: workoutsToAdd }));
+};
 
   // ============================================================================
   // WORKOUT MANAGEMENT
@@ -67,6 +100,53 @@ export default function ClassBuilderScreen({ navigation }) {
       // Add to selection
       setSelectedWorkouts([...selectedWorkouts, workout]);
     }
+  };
+
+  const handleSplitWorkout = (index) => {
+    const workout = builder.workouts[index];
+    
+    // Debug to see structure
+    console.log('Splitting workout:', workout);
+    
+    Alert.alert(
+      'Split into Sides',
+      'This will create separate LEFT and RIGHT versions of this workout.',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Split',
+          onPress: () => {
+            // Get name from the workout object itself
+            const workoutName = workout.workout?.workout_name || 
+                              workout.workout?.name || 
+                              workout.workoutName ||  // Try direct property
+                              'Workout';
+            
+            console.log('Workout name:', workoutName);
+            
+            const leftWorkout = {
+              ...workout,
+              workout: {
+                ...(workout.workout || {}),
+                workout_name: `${workoutName} - LEFT`,
+              },
+            };
+            
+            const rightWorkout = {
+              ...workout,
+              workout: {
+                ...(workout.workout || {}),
+                workout_name: `${workoutName} - RIGHT`,
+              },
+            };
+            
+            const updatedWorkouts = [...builder.workouts];
+            updatedWorkouts.splice(index, 1, leftWorkout, rightWorkout);
+            dispatch(setBuilderField({ field: 'workouts', value: updatedWorkouts }));
+          }
+        }
+      ]
+    );
   };
 
   const handleDoneSelectingWorkouts = () => {
@@ -180,46 +260,65 @@ export default function ClassBuilderScreen({ navigation }) {
       return;
     }
 
+    // CHECK FOR DUPLICATE NAME
+    try {
+      console.log('Checking for duplicates...');
+      const response = await api.get('/classes', { params: { tab: 'personal' } });
+      console.log('Got classes:', response.data.length);
+      
+      const existingClasses = response.data;
+      const editingClassId = route.params?.classId;
+      
+      const duplicateName = existingClasses.some(c => {
+        const isDuplicate = c.name.toLowerCase().trim() === builder.name.toLowerCase().trim();
+        const isDifferentClass = c.id !== editingClassId;
+        return isDuplicate && isDifferentClass;
+      });
+      
+      if (duplicateName) {
+        Alert.alert(
+          'Duplicate Name',
+          'A class with this name already exists. Please choose a different name.',
+          [{ text: 'OK' }]
+        );
+        return;
+      }
+    } catch (error) {
+      console.error('Error checking duplicates:', error);
+      // Continue anyway - don't block save
+    }
+
     setSaving(true);
 
     try {
-      // Format data for API - MATCH BACKEND FIELD NAMES
       const classData = {
         name: builder.name,
-        classTypeId: builder.classTypeId,        // ✅ camelCase
-        scheduledAt: builder.scheduledAt,        // ✅ camelCase
-        isDraft: isDraft,                        // ✅ camelCase
+        classTypeId: builder.classTypeId,
+        scheduledAt: builder.scheduledAt,
+        isDraft: isDraft,
         workouts: builder.workouts.map((w, index) => ({
-          workoutId: w.workoutId || w.workout?.id,  // ✅ camelCase with fallback
+          workoutId: w.workoutId || w.workout?.id,
           durationOverride: w.durationOverride || 0,
           transitionTime: w.transitionTime || 30,
           instructorCues: w.instructorCues || '',
         })),
       };
 
-      // 🔍 DEBUG LOG (remove after testing)
-      console.log('=== SENDING TO BACKEND ===');
-      console.log('Workouts:', classData.workouts);
-      console.log('First workout ID:', classData.workouts[0]?.workoutId);
-      console.log('========================');
+      // CHECK IF EDITING
+      if (route.params?.editMode && route.params?.classId) {
+        // UPDATE existing class
+        await api.put(`/classes/${route.params.classId}`, classData);
+        Alert.alert('Success!', `Class "${builder.name}" updated!`);
+      } else {
+        // CREATE new class
+        await dispatch(createClass(classData)).unwrap();
+        Alert.alert('Success!', `Class "${builder.name}" ${isDraft ? 'saved as draft' : 'created'}!`);
+      }
 
-      await dispatch(createClass(classData)).unwrap();
-
-      Alert.alert(
-        'Success!',
-        `Class "${builder.name}" ${isDraft ? 'saved as draft' : 'created'}!`,
-        [
-          {
-            text: 'OK',
-            onPress: () => {
-              dispatch(clearBuilder());
-              navigation.goBack();
-            },
-          },
-        ]
-      );
+      dispatch(clearBuilder());
+      navigation.goBack();
     } catch (error) {
-      Alert.alert('Error', error || 'Failed to save class. Please try again.');
+      Alert.alert('Error', error || 'Failed to save class.');
     } finally {
       setSaving(false);
     }
@@ -279,7 +378,7 @@ export default function ClassBuilderScreen({ navigation }) {
           <Text style={styles.sectionTitle}>Schedule (Optional)</Text>
           <TouchableOpacity
             style={styles.dateButton}
-            onPress={() => setShowDatePicker(true)}
+            onPress={() => setShowDatePicker(!showDatePicker)}
           >
             <Ionicons name="calendar-outline" size={20} color={COLORS.primary} />
             <Text style={styles.dateButtonText}>
@@ -288,6 +387,75 @@ export default function ClassBuilderScreen({ navigation }) {
                 : 'Set date and time'}
             </Text>
           </TouchableOpacity>
+          
+          {showDatePicker && (
+            <View style={styles.calendarContainer}>
+              <Calendar
+                onDayPress={(day) => {
+                  setSelectedDate(new Date(day.dateString));
+                  // Don't show time picker yet - close calendar first
+                  setShowDatePicker(false);
+                  // Then show time picker after a moment
+                  setTimeout(() => setShowTimePicker(true), 100);
+                }}
+                markedDates={{
+                  [selectedDate.toISOString().split('T')[0]]: {
+                    selected: true,
+                    selectedColor: COLORS.primary
+                  }
+                }}
+                theme={{
+                  backgroundColor: COLORS.surface,
+                  calendarBackground: COLORS.surface,
+                  textSectionTitleColor: COLORS.text,
+                  selectedDayBackgroundColor: COLORS.primary,
+                  selectedDayTextColor: '#ffffff',
+                  todayTextColor: COLORS.primary,
+                  dayTextColor: COLORS.text,
+                  textDisabledColor: COLORS.textSecondary,
+                  monthTextColor: COLORS.text,
+                  arrowColor: COLORS.primary,
+                }}
+              />
+            </View>
+          )}
+
+          {/* Time Picker Modal - Shows AFTER date selected */}
+          {showTimePicker && (
+            <Modal
+              visible={showTimePicker}
+              transparent
+              animationType="fade"
+              onRequestClose={() => setShowTimePicker(false)}
+            >
+              <View style={styles.timePickerModal}>
+                <View style={styles.timePickerContent}>
+                  <Text style={styles.timePickerTitle}>Select Time</Text>
+                  <DateTimePicker
+                    value={selectedDate}
+                    mode="time"
+                    display="spinner"  // ✅ Scrollable!
+                    onChange={(event, time) => {
+                      if (event.type === 'set' && time) {
+                        const combined = new Date(selectedDate);
+                        combined.setHours(time.getHours());
+                        combined.setMinutes(time.getMinutes());
+                        dispatch(setBuilderField({ field: 'scheduledAt', value: combined.toISOString() }));
+                      }
+                      setShowTimePicker(false);
+                    }}
+                  />
+                  <TouchableOpacity
+                    style={styles.timePickerCancel}
+                    onPress={() => setShowTimePicker(false)}
+                  >
+                    <Text style={styles.timePickerCancelText}>Cancel</Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            </Modal>
+          )}
+          
           {builder.scheduledAt && (
             <TouchableOpacity
               onPress={() => dispatch(setBuilderField({ field: 'scheduledAt', value: null }))}
@@ -346,6 +514,13 @@ export default function ClassBuilderScreen({ navigation }) {
                     style={styles.removeButton}
                   >
                     <Ionicons name="trash-outline" size={20} color={COLORS.error} />
+                  </TouchableOpacity>
+                  
+                  <TouchableOpacity
+                    onPress={() => handleSplitWorkout(index)}
+                    style={styles.splitButton}
+                  >
+                    <Ionicons name="git-branch-outline" size={20} color={COLORS.primary} />
                   </TouchableOpacity>
                 </View>
 
@@ -575,15 +750,7 @@ export default function ClassBuilderScreen({ navigation }) {
         />
       )}
 
-      {/* Time Picker */}
-      {showTimePicker && (
-        <DateTimePicker
-          value={selectedDate}
-          mode="time"
-          display="default"
-          onChange={handleTimeChange}
-        />
-      )}
+      
     </View>
   );
 }
@@ -949,5 +1116,48 @@ const styles = StyleSheet.create({
     fontSize: FONT_SIZES.md,
     fontWeight: '600',
     color: '#fff',
+  },
+  splitButton: {
+    padding: SPACING.sm,
+    marginLeft: SPACING.xs,
+  },
+  calendarContainer: {
+  marginTop: SPACING.md,
+  borderRadius: BORDER_RADIUS.md,
+  overflow: 'hidden',
+  borderWidth: 1,
+  borderColor: COLORS.border,
+  },
+  timePickerModal: {
+    flex: 1,
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  timePickerContent: {
+    backgroundColor: COLORS.surface,
+    borderRadius: BORDER_RADIUS.md,
+    padding: SPACING.lg,
+    width: '80%',
+    maxWidth: 400,
+  },
+  timePickerTitle: {
+    fontSize: FONT_SIZES.lg,
+    fontWeight: '600',
+    color: COLORS.text,
+    marginBottom: SPACING.md,
+    textAlign: 'center',
+  },
+  timePickerCancel: {
+    marginTop: SPACING.md,
+    padding: SPACING.md,
+    backgroundColor: COLORS.surfaceLight,
+    borderRadius: BORDER_RADIUS.sm,
+    alignItems: 'center',
+  },
+  timePickerCancelText: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '600',
+    color: COLORS.text,
   },
 });

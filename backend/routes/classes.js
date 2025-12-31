@@ -7,7 +7,7 @@ const router = express.Router();
 // GET /api/classes - Get instructor's classes
 router.get('/', authenticate, async (req, res, next) => {
   try {
-    const { status = 'all', scheduled = 'all' } = req.query;
+    const { status = 'all', scheduled = 'all', tab = 'personal' } = req.query;
 
     let query = `
       SELECT 
@@ -17,17 +17,32 @@ router.get('/', authenticate, async (req, res, next) => {
       FROM classes c
       LEFT JOIN class_types ct ON c.class_type_id = ct.id
       LEFT JOIN class_workouts cw ON c.id = cw.class_id
-      WHERE c.instructor_id = $1
+      WHERE 1=1
     `;
 
-    const params = [req.user.id];
+    const params = [];
+    let paramIndex = 1;
 
+    // ✅ FIXED TAB FILTER - COPY THIS EXACTLY
+    if (tab === 'featured') {
+      // Featured: ONLY show classes where is_featured = TRUE
+      query += ` AND c.is_featured = TRUE`;
+    } else if (tab === 'personal') {
+      // Personal: User's classes where is_featured is NOT TRUE
+      query += ` AND c.instructor_id = $${paramIndex}`;
+      params.push(req.user.id);
+      paramIndex++;
+      query += ` AND (c.is_featured = FALSE OR c.is_featured IS NULL)`;
+    }
+
+    // Status filter
     if (status === 'draft') {
       query += ` AND c.is_draft = true`;
     } else if (status === 'final') {
       query += ` AND c.is_draft = false`;
     }
 
+    // Scheduled filter
     if (scheduled === 'upcoming') {
       query += ` AND c.scheduled_at > CURRENT_TIMESTAMP`;
     } else if (scheduled === 'past') {
@@ -36,7 +51,14 @@ router.get('/', authenticate, async (req, res, next) => {
 
     query += ` GROUP BY c.id, ct.name ORDER BY c.scheduled_at DESC NULLS LAST`;
 
+    console.log('Tab filter:', tab); // Debug
+    console.log('Query:', query); // Debug
+    console.log('Params:', params); // Debug
+
     const result = await pool.query(query, params);
+    
+    console.log(`Returning ${result.rows.length} classes for tab: ${tab}`); // Debug
+    
     res.json(result.rows);
   } catch (error) {
     next(error);
@@ -229,6 +251,58 @@ router.delete('/:id', authenticate, async (req, res, next) => {
 
     await pool.query('DELETE FROM classes WHERE id = $1', [id]);
     res.json({ message: 'Class deleted successfully' });
+  } catch (error) {
+    next(error);
+  }
+});
+
+router.get('/', authenticate, async (req, res, next) => {
+  try {
+    const { status = 'all', scheduled = 'all', tab = 'personal' } = req.query;
+
+    let query = `
+      SELECT 
+        c.*,
+        ct.name as class_type_name,
+        COUNT(cw.id) as workout_count
+      FROM classes c
+      LEFT JOIN class_types ct ON c.class_type_id = ct.id
+      LEFT JOIN class_workouts cw ON c.id = cw.class_id
+      WHERE 1=1
+    `;
+
+    const params = [];
+    let paramIndex = 1;
+
+    // Tab filter - FIXED LOGIC
+    if (tab === 'featured') {
+      // Featured: Only show classes marked as featured
+      query += ` AND c.is_featured = TRUE`;
+    } else if (tab === 'personal') {
+      // Personal: Only show user's classes that are NOT featured
+      query += ` AND c.instructor_id = $${paramIndex} AND (c.is_featured IS NULL OR c.is_featured = FALSE)`;
+      params.push(req.user.id);
+      paramIndex++;
+    }
+
+    // Status filter
+    if (status === 'draft') {
+      query += ` AND c.is_draft = true`;
+    } else if (status === 'final') {
+      query += ` AND c.is_draft = false`;
+    }
+
+    // Scheduled filter
+    if (scheduled === 'upcoming') {
+      query += ` AND c.scheduled_at > CURRENT_TIMESTAMP`;
+    } else if (scheduled === 'past') {
+      query += ` AND c.scheduled_at < CURRENT_TIMESTAMP`;
+    }
+
+    query += ` GROUP BY c.id, ct.name ORDER BY c.scheduled_at DESC NULLS LAST`;
+
+    const result = await pool.query(query, params);
+    res.json(result.rows);
   } catch (error) {
     next(error);
   }

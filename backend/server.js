@@ -1,3 +1,5 @@
+// server.js
+
 require('dotenv').config();
 const express = require('express');
 const helmet = require('helmet');
@@ -6,13 +8,14 @@ const rateLimit = require('express-rate-limit');
 const morgan = require('morgan');
 
 const authRoutes = require('./routes/auth');
-const workoutRoutes = require('./routes/workouts');
+const workoutsRoutes = require('./routes/workouts');
 const classRoutes = require('./routes/classes');
 const submissionRoutes = require('./routes/submissions');
 const marianaRoutes = require('./routes/mariana');
 const consentRoutes = require('./routes/consent');
 const templateRoutes = require('./routes/templates');
 const settingsRoutes = require('./routes/settings');
+const featuredRoutes = require('./routes/featured');
 
 const { errorHandler } = require('./middleware/errorHandler');
 const { auditLogger } = require('./middleware/auditLogger');
@@ -84,13 +87,26 @@ app.get('/health', (req, res) => {
 // ============================================================================
 
 app.use('/api/auth', authRoutes);
-app.use('/api/workouts', workoutRoutes);
+app.use('/api/workouts', workoutsRoutes);
 app.use('/api/classes', classRoutes);
 app.use('/api/submissions', submissionRoutes);
 app.use('/api/mariana', marianaRoutes);
 app.use('/api/consent', consentRoutes);
 app.use('/api/templates', templateRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/featured', featuredRoutes); 
+
+console.log('\n📍 REGISTERED ROUTES:');
+console.log('   ✓ /api/auth');
+console.log('   ✓ /api/workouts');
+console.log('   ✓ /api/classes');
+console.log('   ✓ /api/submissions');
+console.log('   ✓ /api/mariana');
+console.log('   ✓ /api/consent');
+console.log('   ✓ /api/templates');
+console.log('   ✓ /api/settings');
+console.log('   ✓ /api/featured');  // ✅ Should see this!
+console.log('');
 
 // ============================================================================
 // ERROR HANDLING

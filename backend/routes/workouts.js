@@ -1,303 +1,483 @@
 const express = require('express');
-const { pool } = require('../config/database');
-const { authenticate, authorize } = require('../middleware/auth');
-
 const router = express.Router();
+const { pool } = require('../config/database');
+const { authenticate } = require('../middleware/auth');
 
-// GET /api/workouts - Browse catalog with filters
-router.get('/', authenticate, async (req, res, next) => {
+// GET /api/workouts/injury-risks - Fetch all available injury risks
+router.get('/injury-risks', authenticate, async (req, res) => {
   try {
-    const { 
-      search, 
-      difficulty, 
-      status = 'approved',
-      page = 1, 
-      limit = 20 
-    } = req.query;
+    const result = await pool.query(
+      `SELECT 
+        id,
+        name,
+        description,
+        severity
+      FROM injury_risks
+      ORDER BY 
+        CASE severity 
+          WHEN 'high' THEN 1 
+          WHEN 'medium' THEN 2 
+          WHEN 'low' THEN 3 
+          ELSE 4 
+        END,
+        name ASC`
+    );
 
-    let query = `
-      SELECT 
-        w.*,
-        json_agg(DISTINCT jsonb_build_object(
-          'id', wm.id,
-          'type', wm.media_type,
-          'filePath', wm.file_path
-        )) FILTER (WHERE wm.id IS NOT NULL) as media,
-        json_agg(DISTINCT wat.tag) FILTER (WHERE wat.tag IS NOT NULL) as tags,
-        json_agg(DISTINCT jsonb_build_object(
-          'id', ir.id,
-          'name', ir.name,
-          'severity', ir.severity
-        )) FILTER (WHERE ir.id IS NOT NULL) as injury_risks
-      FROM workouts w
-      LEFT JOIN workout_media wm ON w.id = wm.workout_id
-      LEFT JOIN workout_alias_tags wat ON w.id = wat.workout_id
-      LEFT JOIN workout_injury_risks wir ON w.id = wir.workout_id
-      LEFT JOIN injury_risks ir ON wir.injury_risk_id = ir.id
-      WHERE 1=1
-    `;
-
-    const params = [];
-    let paramIndex = 1;
-
-    if (req.user.role === 'instructor') {
-      query += ` AND w.approval_status = 'approved'`;
-    } else if (status !== 'all') {
-      query += ` AND w.approval_status = $${paramIndex}`;
-      params.push(status);
-      paramIndex++;
-    }
-
-    if (search) {
-      query += ` AND (w.name ILIKE $${paramIndex} OR w.description ILIKE $${paramIndex})`;
-      params.push(`%${search}%`);
-      paramIndex++;
-    }
-
-    if (difficulty) {
-      query += ` AND w.difficulty = $${paramIndex}`;
-      params.push(difficulty);
-      paramIndex++;
-    }
-
-    query += ` GROUP BY w.id ORDER BY w.name ASC`;
-
-    const offset = (parseInt(page) - 1) * parseInt(limit);
-    query += ` LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
-    params.push(parseInt(limit), offset);
-
-    const result = await pool.query(query, params);
-
-    res.json({
-      workouts: result.rows,
-      page: parseInt(page),
-      limit: parseInt(limit),
-      total: result.rows.length
-    });
+    res.json(result.rows);
   } catch (error) {
-    next(error);
+    console.error('Error fetching injury risks:', error);
+    res.status(500).json({ error: 'Failed to fetch injury risks' });
   }
 });
 
-// GET /api/workouts/:id - Get workout details
-router.get('/:id', authenticate, async (req, res, next) => {
+// Helper function to get workout with all related data
+async function getWorkoutWithRelations(workoutId) {
+  // Get main workout data
+  const workoutResult = await pool.query(
+    `SELECT 
+      w.*,
+      u.email as created_by_name
+    FROM workouts w
+    LEFT JOIN users u ON w.created_by = u.id
+    WHERE w.id = $1`,
+    [workoutId]
+  );
+
+  if (workoutResult.rows.length === 0) {
+    return null;
+  }
+
+  const workout = workoutResult.rows[0];
+
+  // Get media
+  const mediaResult = await pool.query(
+    `SELECT 
+      id,
+      media_type as type,
+      file_path as "filePath",
+      thumbnail_path as "thumbnailPath",
+      duration
+    FROM workout_media
+    WHERE workout_id = $1
+    ORDER BY created_at ASC`,
+    [workoutId]
+  );
+  workout.media = mediaResult.rows;
+
+  // Get injury risks with details
+  const risksResult = await pool.query(
+    `SELECT 
+      ir.id,
+      ir.name,
+      ir.description,
+      ir.severity,
+      wir.notes
+    FROM workout_injury_risks wir
+    JOIN injury_risks ir ON wir.injury_risk_id = ir.id
+    WHERE wir.workout_id = $1
+    ORDER BY 
+      CASE ir.severity 
+        WHEN 'high' THEN 1 
+        WHEN 'medium' THEN 2 
+        WHEN 'low' THEN 3 
+        ELSE 4 
+      END`,
+    [workoutId]
+  );
+  workout.injury_risks = risksResult.rows;
+
+  // Get tags
+  const tagsResult = await pool.query(
+    `SELECT tag
+    FROM workout_alias_tags
+    WHERE workout_id = $1
+    ORDER BY tag ASC`,
+    [workoutId]
+  );
+  workout.tags = tagsResult.rows.map(row => row.tag);
+
+  return workout;
+}
+
+// GET /api/workouts - Fetch workouts with optional search
+router.get('/', authenticate, async (req, res) => {
+  try {
+    const { search } = req.query;
+    
+    let query = `
+      SELECT 
+        w.id,
+        w.name,
+        w.description,
+        w.default_duration,
+        w.difficulty,
+        w.equipment,
+        w.created_at,
+        w.updated_at,
+        (SELECT COUNT(*) FROM workout_media WHERE workout_id = w.id) as media_count,
+        (SELECT COUNT(*) FROM workout_injury_risks WHERE workout_id = w.id) as risk_count,
+        COALESCE(
+          (SELECT json_agg(tag ORDER BY tag) 
+           FROM workout_alias_tags 
+           WHERE workout_id = w.id), 
+          '[]'::json
+        ) as tags
+      FROM workouts w
+      WHERE 1=1
+    `;
+    const params = [];
+
+    if (search) {
+      query += ` AND (
+        w.name ILIKE $1 OR
+        w.description ILIKE $1 OR
+        EXISTS (
+          SELECT 1 FROM workout_alias_tags 
+          WHERE workout_id = w.id 
+          AND tag ILIKE $1
+        )
+      )`;
+      params.push(`%${search}%`);
+    }
+
+    query += ` ORDER BY w.name ASC`;
+
+    const result = await pool.query(query, params);
+    
+    // Convert tags from JSON to array and add injury_risks placeholder
+    const workouts = result.rows.map(w => ({
+      ...w,
+      tags: w.tags || [],
+      injury_risks: Array(w.risk_count).fill(null), // Placeholder for list view
+      media: Array(w.media_count).fill(null) // Placeholder for list view
+    }));
+    
+    res.json(workouts);
+  } catch (error) {
+    console.error('Error fetching workouts:', error);
+    res.status(500).json({ error: 'Failed to fetch workouts' });
+  }
+});
+
+// GET /api/workouts/:id - Fetch single workout with all relations
+router.get('/:id', authenticate, async (req, res) => {
   try {
     const { id } = req.params;
 
-    const result = await pool.query(`
-      SELECT 
-        w.*,
-        json_agg(DISTINCT jsonb_build_object(
-          'id', wm.id,
-          'type', wm.media_type,
-          'filePath', wm.file_path,
-          'thumbnailPath', wm.thumbnail_path,
-          'duration', wm.duration
-        )) FILTER (WHERE wm.id IS NOT NULL) as media,
-        json_agg(DISTINCT wat.tag) FILTER (WHERE wat.tag IS NOT NULL) as tags,
-        json_agg(DISTINCT jsonb_build_object(
-          'id', ir.id,
-          'name', ir.name,
-          'severity', ir.severity,
-          'description', ir.description,
-          'notes', wir.notes
-        )) FILTER (WHERE ir.id IS NOT NULL) as injury_risks,
-        u.first_name || ' ' || u.last_name as created_by_name
-      FROM workouts w
-      LEFT JOIN workout_media wm ON w.id = wm.workout_id
-      LEFT JOIN workout_alias_tags wat ON w.id = wat.workout_id
-      LEFT JOIN workout_injury_risks wir ON w.id = wir.workout_id
-      LEFT JOIN injury_risks ir ON wir.injury_risk_id = ir.id
-      LEFT JOIN users u ON w.created_by = u.id
-      WHERE w.id = $1
-      GROUP BY w.id, u.first_name, u.last_name
-    `, [id]);
+    const workout = await getWorkoutWithRelations(id);
 
-    if (result.rows.length === 0) {
+    if (!workout) {
       return res.status(404).json({ error: 'Workout not found' });
     }
 
-    res.json(result.rows[0]);
+    res.json(workout);
   } catch (error) {
-    next(error);
+    console.error('Error fetching workout:', error);
+    res.status(500).json({ error: 'Failed to fetch workout' });
   }
 });
 
 // POST /api/workouts - Create new workout
-router.post('/', authenticate, async (req, res, next) => {
+router.post('/', authenticate, async (req, res) => {
+  const client = await pool.connect();
+  
   try {
-    const { 
-      name, 
-      description, 
-      defaultDuration, 
-      difficulty, 
-      equipment, 
-      tags, 
-      injuryRisks,
-      isDraft = true 
+    await client.query('BEGIN');
+
+    const {
+      name,
+      description,
+      default_duration,
+      difficulty,
+      equipment,
+      tags,
+      injury_risk_ids
     } = req.body;
 
-    if (!name) {
-      return res.status(400).json({ error: 'Workout name required' });
+    // Validation
+    if (!name || name.trim().length < 3) {
+      return res.status(400).json({ 
+        error: 'Workout name is required and must be at least 3 characters' 
+      });
     }
 
-    const status = isDraft ? 'draft' : 'pending';
+    if (!default_duration || default_duration <= 0) {
+      return res.status(400).json({ 
+        error: 'Default duration must be greater than 0' 
+      });
+    }
 
-    const result = await pool.query(`
-      INSERT INTO workouts 
-        (name, description, default_duration, difficulty, equipment, created_by, approval_status, is_submission_draft)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING *
-    `, [name, description, defaultDuration, difficulty, equipment, req.user.id, status, isDraft]);
+    const validDifficulties = ['beginner', 'intermediate', 'advanced', 'all_levels'];
+    if (difficulty && !validDifficulties.includes(difficulty)) {
+      return res.status(400).json({ 
+        error: 'Invalid difficulty level' 
+      });
+    }
 
-    const workout = result.rows[0];
+    // Check for duplicate workout name
+    const duplicateCheck = await client.query(
+      'SELECT id FROM workouts WHERE LOWER(name) = LOWER($1)',
+      [name.trim()]
+    );
 
-    if (tags && tags.length > 0) {
+    if (duplicateCheck.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ 
+        error: 'A workout with this name already exists' 
+      });
+    }
+
+    // Create workout
+    const workoutResult = await client.query(
+      `INSERT INTO workouts (
+        name,
+        description,
+        default_duration,
+        difficulty,
+        equipment,
+        created_by,
+        approval_status,
+        is_template,
+        is_submission_draft,
+        last_edited_at,
+        created_at,
+        updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW(), NOW())
+      RETURNING id`,
+      [
+        name.trim(),
+        description || null,
+        default_duration,
+        difficulty || 'all_levels',
+        equipment || [],
+        req.user.id,
+        'pending',
+        false,
+        false
+      ]
+    );
+
+    const workoutId = workoutResult.rows[0].id;
+
+    // Add tags if provided
+    if (tags && Array.isArray(tags) && tags.length > 0) {
       for (const tag of tags) {
-        await pool.query(
-          'INSERT INTO workout_alias_tags (workout_id, tag) VALUES ($1, $2)',
-          [workout.id, tag]
+        if (tag && tag.trim()) {
+          await client.query(
+            'INSERT INTO workout_alias_tags (workout_id, tag) VALUES ($1, $2)',
+            [workoutId, tag.trim().toLowerCase()]
+          );
+        }
+      }
+    }
+
+    // Add injury risks if provided
+    if (injury_risk_ids && Array.isArray(injury_risk_ids) && injury_risk_ids.length > 0) {
+      for (const riskId of injury_risk_ids) {
+        await client.query(
+          'INSERT INTO workout_injury_risks (workout_id, injury_risk_id) VALUES ($1, $2)',
+          [workoutId, riskId]
         );
       }
     }
 
-    if (injuryRisks && injuryRisks.length > 0) {
-      for (const risk of injuryRisks) {
-        await pool.query(
-          'INSERT INTO workout_injury_risks (workout_id, injury_risk_id, notes) VALUES ($1, $2, $3)',
-          [workout.id, risk.id, risk.notes]
-        );
-      }
-    }
+    await client.query('COMMIT');
 
-    res.status(201).json(workout);
+    // Fetch the complete workout with relations
+    const completeWorkout = await getWorkoutWithRelations(workoutId);
+    res.status(201).json(completeWorkout);
+
   } catch (error) {
-    next(error);
-  }
-});
-
-// GET /api/workouts/drafts - Get user's drafts
-router.get('/drafts/list', authenticate, async (req, res, next) => {
-  try {
-    const result = await pool.query(`
-      SELECT w.*, 
-        EXTRACT(EPOCH FROM (CURRENT_TIMESTAMP - w.last_edited_at)) as seconds_since_edit
-      FROM workouts w
-      WHERE w.created_by = $1 
-        AND w.is_submission_draft = true
-      ORDER BY w.last_edited_at DESC
-    `, [req.user.id]);
-
-    res.json(result.rows);
-  } catch (error) {
-    next(error);
-  }
-});
-
-// POST /api/workouts/:id/duplicate - Duplicate workout
-router.post('/:id/duplicate', authenticate, async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const { makeDraft = false } = req.body;
-
-    const originalResult = await pool.query(
-      'SELECT * FROM workouts WHERE id = $1',
-      [id]
-    );
-
-    if (originalResult.rows.length === 0) {
-      return res.status(404).json({ error: 'Workout not found' });
-    }
-
-    const original = originalResult.rows[0];
-
-    const duplicateResult = await pool.query(`
-      INSERT INTO workouts 
-        (name, description, default_duration, difficulty, equipment, 
-         created_by, approval_status, is_submission_draft)
-      VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-      RETURNING *
-    `, [
-      original.name + ' (Copy)',
-      original.description,
-      original.default_duration,
-      original.difficulty,
-      original.equipment,
-      req.user.id,
-      makeDraft ? 'draft' : 'pending',
-      makeDraft
-    ]);
-
-    const duplicate = duplicateResult.rows[0];
-
-    await pool.query(
-      'INSERT INTO workout_duplicates (original_workout_id, duplicate_workout_id, duplicated_by) VALUES ($1, $2, $3)',
-      [id, duplicate.id, req.user.id]
-    );
-
-    await pool.query(`
-      INSERT INTO workout_alias_tags (workout_id, tag)
-      SELECT $1, tag FROM workout_alias_tags WHERE workout_id = $2
-    `, [duplicate.id, id]);
-
-    await pool.query(`
-      INSERT INTO workout_injury_risks (workout_id, injury_risk_id, notes)
-      SELECT $1, injury_risk_id, notes FROM workout_injury_risks WHERE workout_id = $2
-    `, [duplicate.id, id]);
-
-    res.status(201).json(duplicate);
-  } catch (error) {
-    next(error);
+    await client.query('ROLLBACK');
+    console.error('Error creating workout:', error);
+    res.status(500).json({ error: 'Failed to create workout' });
+  } finally {
+    client.release();
   }
 });
 
 // PUT /api/workouts/:id - Update workout
-router.put('/:id', authenticate, async (req, res, next) => {
+router.put('/:id', authenticate, async (req, res) => {
+  const client = await pool.connect();
+  
   try {
-    const { id } = req.params;
-    const { name, description, defaultDuration, difficulty, equipment } = req.body;
+    await client.query('BEGIN');
 
-    const checkResult = await pool.query(
-      'SELECT created_by FROM workouts WHERE id = $1',
+    const { id } = req.params;
+    const {
+      name,
+      description,
+      default_duration,
+      difficulty,
+      equipment,
+      tags,
+      injury_risk_ids
+    } = req.body;
+
+    // Check if workout exists
+    const existingWorkout = await client.query(
+      'SELECT id FROM workouts WHERE id = $1',
       [id]
     );
 
-    if (checkResult.rows.length === 0) {
+    if (existingWorkout.rows.length === 0) {
+      await client.query('ROLLBACK');
       return res.status(404).json({ error: 'Workout not found' });
     }
 
-    if (
-      req.user.role === 'instructor' && 
-      checkResult.rows[0].created_by !== req.user.id
-    ) {
-      return res.status(403).json({ error: 'Cannot edit workout created by another instructor' });
+    // Validation
+    if (!name || name.trim().length < 3) {
+      return res.status(400).json({ 
+        error: 'Workout name is required and must be at least 3 characters' 
+      });
     }
 
-    const result = await pool.query(`
-      UPDATE workouts 
-      SET name = COALESCE($1, name),
-          description = COALESCE($2, description),
-          default_duration = COALESCE($3, default_duration),
-          difficulty = COALESCE($4, difficulty),
-          equipment = COALESCE($5, equipment)
-      WHERE id = $6
-      RETURNING *
-    `, [name, description, defaultDuration, difficulty, equipment, id]);
+    if (!default_duration || default_duration <= 0) {
+      return res.status(400).json({ 
+        error: 'Default duration must be greater than 0' 
+      });
+    }
 
-    res.json(result.rows[0]);
+    const validDifficulties = ['beginner', 'intermediate', 'advanced', 'all_levels'];
+    if (difficulty && !validDifficulties.includes(difficulty)) {
+      return res.status(400).json({ 
+        error: 'Invalid difficulty level' 
+      });
+    }
+
+    // Check for duplicate workout name (excluding current workout)
+    const duplicateCheck = await client.query(
+      'SELECT id FROM workouts WHERE LOWER(name) = LOWER($1) AND id != $2',
+      [name.trim(), id]
+    );
+
+    if (duplicateCheck.rows.length > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ 
+        error: 'A workout with this name already exists' 
+      });
+    }
+
+    // Update workout
+    await client.query(
+      `UPDATE workouts SET
+        name = $1,
+        description = $2,
+        default_duration = $3,
+        difficulty = $4,
+        equipment = $5,
+        last_edited_at = NOW(),
+        updated_at = NOW()
+      WHERE id = $6`,
+      [
+        name.trim(),
+        description || null,
+        default_duration,
+        difficulty || 'all_levels',
+        equipment || [],
+        id
+      ]
+    );
+
+    // Update tags - delete old ones and insert new ones
+    if (tags !== undefined) {
+      await client.query('DELETE FROM workout_alias_tags WHERE workout_id = $1', [id]);
+      
+      if (Array.isArray(tags) && tags.length > 0) {
+        for (const tag of tags) {
+          if (tag && tag.trim()) {
+            await client.query(
+              'INSERT INTO workout_alias_tags (workout_id, tag) VALUES ($1, $2)',
+              [id, tag.trim().toLowerCase()]
+            );
+          }
+        }
+      }
+    }
+
+    // Update injury risks - delete old ones and insert new ones
+    if (injury_risk_ids !== undefined) {
+      await client.query('DELETE FROM workout_injury_risks WHERE workout_id = $1', [id]);
+      
+      if (Array.isArray(injury_risk_ids) && injury_risk_ids.length > 0) {
+        for (const riskId of injury_risk_ids) {
+          await client.query(
+            'INSERT INTO workout_injury_risks (workout_id, injury_risk_id) VALUES ($1, $2)',
+            [id, riskId]
+          );
+        }
+      }
+    }
+
+    await client.query('COMMIT');
+
+    // Fetch the complete updated workout
+    const completeWorkout = await getWorkoutWithRelations(id);
+    res.json(completeWorkout);
+
   } catch (error) {
-    next(error);
+    await client.query('ROLLBACK');
+    console.error('Error updating workout:', error);
+    res.status(500).json({ error: 'Failed to update workout' });
+  } finally {
+    client.release();
   }
 });
 
 // DELETE /api/workouts/:id - Delete workout
-router.delete('/:id', authenticate, authorize('admin', 'manager'), async (req, res, next) => {
+router.delete('/:id', authenticate, async (req, res) => {
+  const client = await pool.connect();
+  
   try {
+    await client.query('BEGIN');
+
     const { id } = req.params;
-    await pool.query('DELETE FROM workouts WHERE id = $1', [id]);
-    res.json({ message: 'Workout deleted successfully' });
+
+    // Check if workout exists
+    const existingWorkout = await client.query(
+      'SELECT id FROM workouts WHERE id = $1',
+      [id]
+    );
+
+    if (existingWorkout.rows.length === 0) {
+      await client.query('ROLLBACK');
+      return res.status(404).json({ error: 'Workout not found' });
+    }
+
+    // Check if workout is used in any classes
+    const usageCheck = await client.query(
+      'SELECT COUNT(*) as count FROM class_workouts WHERE workout_id = $1',
+      [id]
+    );
+
+    if (parseInt(usageCheck.rows[0].count) > 0) {
+      await client.query('ROLLBACK');
+      return res.status(409).json({ 
+        error: 'Cannot delete workout - it is currently used in one or more classes' 
+      });
+    }
+
+    // Delete related records (cascade should handle this, but being explicit)
+    await client.query('DELETE FROM workout_alias_tags WHERE workout_id = $1', [id]);
+    await client.query('DELETE FROM workout_injury_risks WHERE workout_id = $1', [id]);
+    await client.query('DELETE FROM workout_media WHERE workout_id = $1', [id]);
+    
+    // Delete workout
+    await client.query('DELETE FROM workouts WHERE id = $1', [id]);
+
+    await client.query('COMMIT');
+
+    res.json({ 
+      message: 'Workout deleted successfully',
+      id 
+    });
+
   } catch (error) {
-    next(error);
+    await client.query('ROLLBACK');
+    console.error('Error deleting workout:', error);
+    res.status(500).json({ error: 'Failed to delete workout' });
+  } finally {
+    client.release();
   }
 });
 

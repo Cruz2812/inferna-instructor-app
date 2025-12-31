@@ -1,5 +1,5 @@
 // src/screens/ClassDetailScreen.js
-import React, { useEffect } from 'react';
+import React, { useEffect, useLayoutEffect } from 'react';
 import {
   View,
   Text,
@@ -14,6 +14,7 @@ import { useDispatch, useSelector } from 'react-redux';
 import { fetchClassDetail } from '../store/classesSlice';
 import { format } from 'date-fns';
 import { COLORS, SPACING, BORDER_RADIUS, FONT_SIZES } from '../constants/theme';
+import api from '../services/api';
 
 export default function ClassDetailScreen({ route, navigation }) {
   const { classId } = route.params;
@@ -51,6 +52,123 @@ export default function ClassDetailScreen({ route, navigation }) {
       },
       workouts: playModeWorkouts,
     });
+  };
+
+  // Add useLayoutEffect to set header button
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <TouchableOpacity
+          style={{ marginRight: 16 }}
+          onPress={handleEditClass}
+        >
+          <Ionicons name="create-outline" size={24} color={COLORS.primary} />
+        </TouchableOpacity>
+      ),
+    });
+  }, [currentClass]);
+
+  const handleEditClass = () => {
+    // Navigate to builder with pre-populated data
+    navigation.navigate('ClassBuilder', {
+      editMode: true,
+      classId: currentClass.id,
+      classData: currentClass,
+    });
+  };
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <View style={{ flexDirection: 'row', marginRight: 16, gap: 16 }}>
+          <TouchableOpacity onPress={handleEditClass}>
+            <Ionicons name="create-outline" size={24} color={COLORS.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleDeleteClass}>
+            <Ionicons name="trash-outline" size={24} color={COLORS.error} />
+          </TouchableOpacity>
+        </View>
+      ),
+    });
+  }, [currentClass]);
+
+  const handleDeleteClass = () => {
+    Alert.alert(
+      'Delete Class',
+      `Delete "${currentClass.name}"? This cannot be undone.`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Delete',
+          style: 'destructive',
+          onPress: async () => {
+            try {
+              await api.delete(`/classes/${currentClass.id}`);
+              Alert.alert('Success', 'Class deleted');
+              navigation.goBack();
+            } catch (error) {
+              Alert.alert('Error', 'Failed to delete class');
+            }
+          }
+        }
+      ]
+    );
+  };
+
+  useLayoutEffect(() => {
+    navigation.setOptions({
+      headerRight: () => (
+        <View style={{ flexDirection: 'row', marginRight: 16, gap: 16 }}>
+          <TouchableOpacity onPress={handleDuplicateClass}>
+            <Ionicons name="copy-outline" size={24} color={COLORS.text} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleEditClass}>
+            <Ionicons name="create-outline" size={24} color={COLORS.primary} />
+          </TouchableOpacity>
+          <TouchableOpacity onPress={handleDeleteClass}>
+            <Ionicons name="trash-outline" size={24} color={COLORS.error} />
+          </TouchableOpacity>
+        </View>
+      ),
+    });
+  }, [currentClass]);
+
+  const handleDuplicateClass = () => {
+    // Navigate to builder with class data but NO classId (so it creates new)
+    navigation.navigate('ClassBuilder', {
+      duplicateMode: true,
+      classData: {
+        ...currentClass,
+        name: `${currentClass.name} (Copy)`,  // Add (Copy) to name
+      },
+    });
+  };
+
+  const handleSubmitForFeatured = async () => {
+    Alert.alert(
+      'Submit for Featured',
+      'Submit this class for admin review to be featured?',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Submit',
+          onPress: async () => {
+            try {
+              console.log('Submitting class:', currentClass.id);
+              const response = await api.post(`/featured/classes/${currentClass.id}/submit`);
+              console.log('Submit response:', response.data);
+              Alert.alert('Success', 'Class submitted for review!');
+              dispatch(fetchClassDetail(currentClass.id));
+            } catch (error) {
+              console.error('Submit error:', error);
+              console.error('Error response:', error.response?.data);
+              const errorMsg = error.response?.data?.error || 'Failed to submit class';
+              Alert.alert('Error', errorMsg);
+            }
+          }
+        }
+      ]
+    );
   };
 
   if (loading || !currentClass) {
@@ -171,6 +289,29 @@ export default function ClassDetailScreen({ route, navigation }) {
           </TouchableOpacity>
         </View>
       )}
+
+      {/* Submit for Featured - Only for non-draft, non-featured classes */}
+      {!currentClass.is_draft && 
+      !currentClass.is_featured && 
+      currentClass.featured_status !== 'pending' && (
+        <TouchableOpacity
+          style={styles.submitFeaturedButton}
+          onPress={handleSubmitForFeatured}
+        >
+          <Ionicons name="star-outline" size={20} color={COLORS.primary} />
+          <Text style={styles.submitFeaturedText}>Submit for Featured</Text>
+        </TouchableOpacity>
+      )}
+
+      {/* Pending Review Badge */}
+      {currentClass.featured_status === 'pending' && (
+        <View style={styles.pendingBadge}>
+          <Ionicons name="time-outline" size={16} color={COLORS.warning} />
+          <Text style={styles.pendingText}>Pending Review</Text>
+        </View>
+      )}
+
+      
     </ScrollView>
   );
 }
@@ -322,4 +463,39 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     color: '#FFF',
   },
+  submitFeaturedButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: COLORS.surface,
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.md,
+    gap: SPACING.sm,
+    marginHorizontal: SPACING.lg,
+    marginBottom: SPACING.md,
+    borderWidth: 1,
+    borderColor: COLORS.primary,
+  },
+  submitFeaturedText: {
+    fontSize: FONT_SIZES.md,
+    fontWeight: '600',
+    color: COLORS.primary,
+  },
+  pendingBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: `${COLORS.warning}33`,
+    padding: SPACING.md,
+    borderRadius: BORDER_RADIUS.md,
+    gap: SPACING.sm,
+    marginHorizontal: SPACING.lg,
+    marginBottom: SPACING.md,
+  },
+  pendingText: {
+    fontSize: FONT_SIZES.sm,
+    fontWeight: '600',
+    color: COLORS.warning,
+  },
+
+  
 });

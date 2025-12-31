@@ -6,13 +6,16 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { Ionicons } from '@expo/vector-icons';
 import { COLORS } from '../constants/theme';
 
-// Screens
-import WorkoutCatalogScreen from '../screens/WorkoutCatalogScreen';
-import WorkoutDetailScreen from '../screens/WorkoutDetailScreen';
+// Tab Screens
 import ClassesScreen from '../screens/ClassesScreen';
+import WorkoutCatalogScreen from '../screens/WorkoutCatalogScreen';
+
+// Stack Screens
+import ClassBuilderScreen from '../screens/ClassBuilderScreen';
 import ClassDetailScreen from '../screens/ClassDetailScreen';
 import PlayModeScreen from '../screens/PlayModeScreen';
-import ClassBuilderScreen from '../screens/ClassBuilderScreen';
+import WorkoutBuilderScreen from '../screens/WorkoutBuilderScreen';
+import WorkoutDetailScreen from '../screens/WorkoutDetailScreen';
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
@@ -38,16 +41,35 @@ function WorkoutStack() {
         component={WorkoutCatalogScreen}
         options={{ title: 'Workouts' }}
       />
-      <Stack.Screen
-        name="WorkoutDetail"
+      <Stack.Screen 
+        name="WorkoutBuilder" 
+        component={WorkoutBuilderScreen}
+        options={{
+          headerShown: true,
+          headerStyle: {
+            backgroundColor: COLORS.background,
+          },
+          headerTintColor: COLORS.text,
+          headerShadowVisible: false,
+        }}
+      />
+      <Stack.Screen 
+        name="WorkoutDetail" 
         component={WorkoutDetailScreen}
-        options={{ title: 'Workout Details' }}
+        options={{
+          headerShown: true,
+          headerStyle: {
+            backgroundColor: COLORS.background,
+          },
+          headerTintColor: COLORS.text,
+          headerShadowVisible: false,
+        }}
       />
     </Stack.Navigator>
   );
 }
 
-// Classes Stack - ADD THIS
+// Classes Stack
 function ClassesStack() {
   return (
     <Stack.Navigator
@@ -107,15 +129,15 @@ export default function MainNavigator() {
           borderTopColor: COLORS.border,
           borderTopWidth: 1,
           paddingTop: 8,
-          paddingBottom: 24, // INCREASED from 8 to 24 for better spacing
-          height: 76, // INCREASED from 60 to 76
+          paddingBottom: 24,
+          height: 76,
         },
         tabBarActiveTintColor: COLORS.primary,
         tabBarInactiveTintColor: COLORS.textSecondary,
         tabBarLabelStyle: {
           fontSize: 12,
           fontWeight: '500',
-          marginBottom: 4, // Added margin
+          marginBottom: 4,
         },
         headerShown: false,
       }}
